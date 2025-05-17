@@ -10,18 +10,19 @@ GPIO.cleanup()
 
 # Adjust
 MAX_DUTY_CYCLE = 50
+ANGULAR_MULTIPLIER = 0.3
 
 # Initialize
 joysticks = []
-
-lin_direction = "forward"
-turn_direction = ""
 
 linear_speed = 0
 angular_speed = 0
 
 left_wheel_speed = 0
 right_wheel_speed = 0
+
+l_trim_multiplier = 1
+r_trim_multiplier = 1
 
 left_duty_cycle = 0
 right_duty_cycle = 0
@@ -57,115 +58,156 @@ def linear(joy):
     left_thumb = joy.get_axis(1)
     if left_thumb > 0.1:
         linear_speed = left_thumb
-        lin_direction = "reverse"
     elif left_thumb < -0.1:
-        linear_speed = left_thumb*-1
-        lin_direction = "forward"
+        linear_speed = left_thumb
     else:
         linear_speed = 0
-        lin_direction = "forward"
-    return linear_speed, lin_direction
+    return linear_speed
 
 
 def angular(joy):
     right_thumb = joy.get_axis(2)
     if right_thumb > 0.1:
         angular_speed = right_thumb
-        turn_direction = "right"
     elif right_thumb < -0.1:
-        angular_speed = right_thumb*-1
-        turn_direction = "left"
+        angular_speed = right_thumb
     else:
         angular_speed = 0
-        turn_direction = ""
-    return angular_speed, turn_direction
+    return angular_speed
 
 
-def set_forward(linear_speed, angular_speed, turn_direction):
-    # Assign input Pins
-    GPIO.output(INPUT1_LEFT, GPIO.HIGH)
-    GPIO.output(INPUT2_LEFT, GPIO.LOW)
-
-    GPIO.output(INPUT3_RIGHT, GPIO.HIGH)
-    GPIO.output(INPUT4_RIGHT, GPIO.LOW)
-
-    # Calculate speec
-    left_wheel_speed = linear_speed
-    right_wheel_speed = linear_speed
-    if turn_direction == "right":
-        left_wheel_speed += angular_speed
+def left_enable(command):
+    if command == "forward":
+        GPIO.output(INPUT1_LEFT, GPIO.HIGH)
+        GPIO.output(INPUT2_LEFT, GPIO.LOW)
     else:
-        right_wheel_speed += angular_speed
-    return left_wheel_speed, right_wheel_speed
+        GPIO.output(INPUT1_LEFT, GPIO.LOW)
+        GPIO.output(INPUT2_LEFT, GPIO.HIGH)
 
 
-def set_backward(linear_speed, angular_speed, turn_direction):
-    # Assign input Pins
-    GPIO.output(INPUT1_LEFT, GPIO.LOW)
-    GPIO.output(INPUT2_LEFT, GPIO.HIGH)
-
-    GPIO.output(INPUT3_RIGHT, GPIO.LOW)
-    GPIO.output(INPUT4_RIGHT, GPIO.HIGH)
-
-    # Calculate speed
-    left_wheel_speed = linear_speed
-    right_wheel_speed = linear_speed
-    if turn_direction == "right":
-        left_wheel_speed -= angular_speed
+def right_enable(command):
+    if command == "forward":
+        GPIO.output(INPUT3_RIGHT, GPIO.HIGH)
+        GPIO.output(INPUT4_RIGHT, GPIO.LOW)
     else:
-        right_wheel_speed -= angular_speed
-    return left_wheel_speed, right_wheel_speed
+        GPIO.output(INPUT3_RIGHT, GPIO.LOW)
+        GPIO.output(INPUT4_RIGHT, GPIO.HIGH)
 
 
-def convert_to_pwm(left_wheel_speed, right_wheel_speed):
-    left_duty_cycle = np.interp(
-        left_wheel_speed, [0, 1], [0, MAX_DUTY_CYCLE])
+def convert_to_pwm(left_dir, right_dir, left_wheel_speed, right_wheel_speed):
     right_duty_cycle = np.interp(
-        right_wheel_speed, [0, 1], [0, MAX_DUTY_CYCLE])
+        right_wheel_speed, [0, 1+ANGULAR_MULTIPLIER], [0, MAX_DUTY_CYCLE])
+    left_duty_cycle = np.interp(
+        left_wheel_speed, [0, 1+ANGULAR_MULTIPLIER], [0, MAX_DUTY_CYCLE])
+
+    if right_dir == 1:
+        right_enable("forward")
+    else:
+        right_enable("backward")
+    if left_dir == 1:
+        right_enable("forward")
+    else:
+        right_enable("backward")
+
     return left_duty_cycle, right_duty_cycle
+
+
+def trim(dir, l_trim_multiplier, r_trim_multiplier):
+    # Ensure good multipliers
+    if l_trim_multiplier <= 0.5 or r_trim_multiplier <= 0.5:
+        return l_trim_multiplier, r_trim_multiplier
+
+    # Adjust for motor power differences
+    if dir == "left":
+        l_trim_multiplier -= 0.01
+        r_trim_multiplier += 0.01
+    else:
+        l_trim_multiplier += 0.01
+        r_trim_multiplier -= 0.01
+
+    return l_trim_multiplier, r_trim_multiplier
+
+
+def reset_trim(l_trim_multiplier, r_trim_multiplier):
+    l_trim_multiplier = 1
+    r_trim_multiplier = 1
+    return l_trim_multiplier, r_trim_multiplier
 
 
 running = True
 
 while running:
     for event in pygame.event.get():
+        # Read events
+
+        # Connect controller
         if event.type == pygame.JOYDEVICEADDED:
             print("Controller Connected")
             joy = pygame.joystick.Joystick(event.device_index)
             joysticks.append(joy)
 
+        # Disconnect controller
         if event.type == pygame.JOYDEVICEREMOVED:
             print("Controller Disconnected")
             joysticks.clear()
 
+    # Read joystick button presses and axis movements
     if joysticks:
-        # Forward/backward and left/right
-        linear_speed, lin_direction = linear(joy)
-        angular_speed, turn_direction = angular(joy)
+        # Forward/backward direction and speed from [0,1]
+        linear_speed = linear(joy)
+        # Angular direction and speed from [0,1]
+        angular_speed = angular(joy)
 
-        if lin_direction == "forward":
-            left_wheel_speed, right_wheel_speed = set_forward(
-                linear_speed, angular_speed, turn_direction)
+        # Check trim buttons
+        if joy.get_hat(0)[0] == -1:  # Left-trim left
+            l_trim_multiplier, r_trim_multiplier = trim(
+                "left", l_trim_multiplier, r_trim_multiplier)
+        elif joy.get_hat(0)[0] == 1:  # Right-trim right
+            l_trim_multiplier, r_trim_multiplier = trim(
+                "right", l_trim_multiplier, r_trim_multiplier)
+        elif joy.get_hat(0)[1] == -1:  # Down-reset
+            l_trim_multiplier, r_trim_multiplier = reset_trim(
+                l_trim_multiplier, r_trim_multiplier)
+
+        # Calculate speeds
+        angular_speed = angular_speed * ANGULAR_MULTIPLIER
+
+        # Joystick Down
+        if linear_speed > 0:
+            left_wheel_speed = -linear_speed - angular_speed
+            right_wheel_speed = -linear_speed + angular_speed
+
+        # Joystick Up
         else:
-            left_wheel_speed, right_wheel_speed = set_backward(
-                linear_speed, angular_speed, turn_direction)
+            left_wheel_speed = -linear_speed + angular_speed
+            right_wheel_speed = -linear_speed - angular_speed
+
+    # Get final direction and magnitude of speed
+    left_dir = np.sign(left_wheel_speed)
+    right_dir = np.sign(right_wheel_speed)
+
+    left_wheel_speed = np.abs(left_wheel_speed)
+    right_wheel_speed = np.abs(right_wheel_speed)
+
+    # Add boosts
+    left_wheel_speed = left_wheel_speed*l_trim_multiplier
+    right_wheel_speed = right_wheel_speed*r_trim_multiplier
 
     # Stop with no controller
     if not joysticks:
         left_wheel_speed = 0
         right_wheel_speed = 0
 
-    # Write to motors
+    # Write to input pins and get duty cycle
     left_duty_cycle, right_duty_cycle = convert_to_pwm(
-        left_wheel_speed, right_wheel_speed)
+        left_dir, right_dir, left_wheel_speed, right_wheel_speed)
+
+    # Write to enablers
+
     pwm_left.ChangeDutyCycle(left_duty_cycle)
     pwm_right.ChangeDutyCycle(right_duty_cycle)
 
-    # print(f"left: {left_duty_cycle}")
-    # print(f"right: {right_duty_cycle}")
-    # print(f"Linear direction: {lin_direction}")
-    # print(f"Angular direction: {turn_direction}")
-    # print(f"1: {INPUT1_LEFT}")
-    # print(f"2: {inp}")
-    # print(f"3: {lin_direction}")
-    # print(f"4: {turn_direction}")
+    # print(f"left: {left_duty_cycle} | speed: {left_wheel_speed}")
+    # print(f"right: {right_duty_cycle} | speed {right_wheel_speed}")
+    # print(f"right trim: {r_trim_multiplier} | left trim {l_trim_multiplier}")
+    time.sleep(0.4)
