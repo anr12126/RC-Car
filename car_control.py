@@ -34,8 +34,8 @@ INPUT2_LEFT = 20
 INPUT3_RIGHT = 7
 INPUT4_RIGHT = 8
 
-ENABLE_LEFT = 24
-ENABLE_RIGHT = 23
+ENABLE_LEFT = 12
+ENABLE_RIGHT = 13
 
 # Set pin modes
 GPIO.setmode(GPIO.BCM)
@@ -76,7 +76,7 @@ def angular(joy):
     return angular_speed
 
 
-def left_enable(command):
+def left_input(command):
     if command == "forward":
         GPIO.output(INPUT1_LEFT, GPIO.HIGH)
         GPIO.output(INPUT2_LEFT, GPIO.LOW)
@@ -85,7 +85,7 @@ def left_enable(command):
         GPIO.output(INPUT2_LEFT, GPIO.HIGH)
 
 
-def right_enable(command):
+def right_input(command):
     if command == "forward":
         GPIO.output(INPUT3_RIGHT, GPIO.HIGH)
         GPIO.output(INPUT4_RIGHT, GPIO.LOW)
@@ -100,14 +100,14 @@ def convert_to_pwm(left_dir, right_dir, left_wheel_speed, right_wheel_speed):
     left_duty_cycle = np.interp(
         left_wheel_speed, [0, 1+ANGULAR_MULTIPLIER], [0, MAX_DUTY_CYCLE])
 
-    if right_dir == 1:
-        right_enable("forward")
+    if right_dir == 1 or right_dir == 0:
+        right_input("forward")
     else:
-        right_enable("backward")
-    if left_dir == 1:
-        right_enable("forward")
+        right_input("backward")
+    if left_dir == 1 or left_dir == 0:
+        left_input("forward")
     else:
-        right_enable("backward")
+        left_input("backward")
 
     return left_duty_cycle, right_duty_cycle
 
