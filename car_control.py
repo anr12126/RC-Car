@@ -49,9 +49,11 @@ GPIO.setup(ENABLE_RIGHT, GPIO.OUT)
 # Initialize PWM at 1 kHz
 pwm_left = GPIO.PWM(ENABLE_LEFT, 1000)
 pwm_left.start(0)
+pwm_left.ChangeDutyCycle(0)
 
 pwm_right = GPIO.PWM(ENABLE_RIGHT, 1000)
 pwm_right.start(0)
+pwm_right.ChangeDutyCycle(0)
 
 
 def linear(joy):
