@@ -39,21 +39,18 @@ ENABLE_RIGHT = 13
 
 # Set pin modes
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(INPUT1_LEFT, GPIO.OUT)
-GPIO.setup(INPUT2_LEFT, GPIO.OUT)
-GPIO.setup(INPUT3_RIGHT, GPIO.OUT)
-GPIO.setup(INPUT4_RIGHT, GPIO.OUT)
-GPIO.setup(ENABLE_LEFT, GPIO.OUT)
-GPIO.setup(ENABLE_RIGHT, GPIO.OUT)
+for pin in (INPUT1_LEFT, INPUT2_LEFT, INPUT3_RIGHT, INPUT4_RIGHT,
+            ENABLE_LEFT, ENABLE_RIGHT):
+    GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
 
 # Initialize PWM at 1 kHz
-pwm_left = GPIO.PWM(ENABLE_LEFT, 1000)
+GPIO.output(ENABLE_LEFT, GPIO.LOW)
+pwm_left  = GPIO.PWM(ENABLE_LEFT, 1000)
 pwm_left.start(0)
-pwm_left.ChangeDutyCycle(0)
 
+GPIO.output(ENABLE_RIGHT, GPIO.LOW)
 pwm_right = GPIO.PWM(ENABLE_RIGHT, 1000)
 pwm_right.start(0)
-pwm_right.ChangeDutyCycle(0)
 
 
 def linear(joy):
