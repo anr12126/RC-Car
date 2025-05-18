@@ -1,4 +1,3 @@
-
 import time
 import pygame
 import numpy as np
@@ -8,7 +7,8 @@ pygame.init()
 pygame.joystick.init()
 
 # Adjust
-MAX_DUTY_CYCLE = 50
+MAX_DUTY_CYCLE = 80
+MIN_DUTY_CYCLE = 25
 ANGULAR_MULTIPLIER = 0.3
 TRIM_STEP = 0.01
 
@@ -39,18 +39,21 @@ ENABLE_RIGHT = 13
 
 # Set pin modes
 GPIO.setmode(GPIO.BCM)
-for pin in (INPUT1_LEFT, INPUT2_LEFT, INPUT3_RIGHT, INPUT4_RIGHT,
-            ENABLE_LEFT, ENABLE_RIGHT):
-    GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+GPIO.setup(INPUT1_LEFT, GPIO.OUT)
+GPIO.setup(INPUT2_LEFT, GPIO.OUT)
+GPIO.setup(INPUT3_RIGHT, GPIO.OUT)
+GPIO.setup(INPUT4_RIGHT, GPIO.OUT)
+GPIO.setup(ENABLE_LEFT, GPIO.OUT)
+GPIO.setup(ENABLE_RIGHT, GPIO.OUT)
 
 # Initialize PWM at 1 kHz
-GPIO.output(ENABLE_LEFT, GPIO.LOW)
 pwm_left = GPIO.PWM(ENABLE_LEFT, 1000)
 pwm_left.start(0)
+pwm_left.ChangeDutyCycle(0)
 
-GPIO.output(ENABLE_RIGHT, GPIO.LOW)
 pwm_right = GPIO.PWM(ENABLE_RIGHT, 1000)
 pwm_right.start(0)
+pwm_right.ChangeDutyCycle(0)
 
 
 def linear(joy):
@@ -98,6 +101,11 @@ def convert_to_pwm(left_dir, right_dir, left_wheel_speed, right_wheel_speed):
         right_wheel_speed, [0, 1+ANGULAR_MULTIPLIER], [0, MAX_DUTY_CYCLE])
     left_duty_cycle = np.interp(
         left_wheel_speed, [0, 1+ANGULAR_MULTIPLIER], [0, MAX_DUTY_CYCLE])
+    
+    if right_duty_cycle > 1 and right_duty_cycle < MIN_DUTY_CYCLE:
+        right_duty_cycle = MIN_DUTY_CYCLE
+    if left_duty_cycle > 1 and left_duty_cycle < MIN_DUTY_CYCLE:
+        left_duty_cycle = MIN_DUTY_CYCLE
 
     if right_dir == 1 or right_dir == 0:
         right_input("forward")
@@ -192,23 +200,20 @@ try:
         left_wheel_speed = left_wheel_speed*l_trim_multiplier
         right_wheel_speed = right_wheel_speed*r_trim_multiplier
 
+        # Stop with no controller
         if not joysticks:
             left_wheel_speed = right_wheel_speed = 0
-            left_dir = right_dir = 0
+            left_dir = right_dir = 0  
 
         # Write to input pins and get duty cycle
         left_duty_cycle, right_duty_cycle = convert_to_pwm(
             left_dir, right_dir, left_wheel_speed, right_wheel_speed)
 
         # Write to enablers
-
         pwm_left.ChangeDutyCycle(left_duty_cycle)
         pwm_right.ChangeDutyCycle(right_duty_cycle)
-
-        # print(f"left: {left_duty_cycle} | speed: {left_wheel_speed}")
-        # print(f"right: {right_duty_cycle} | speed {right_wheel_speed}")
-        # print(f"right trim: {r_trim_multiplier} | left trim {l_trim_multiplier}")
-        time.sleep(0.4)
+        print(left_duty_cycle)
+        print(right_duty_cycle)
 finally:
     pwm_left.stop()
     pwm_right.stop()
