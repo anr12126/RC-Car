@@ -45,7 +45,7 @@ for pin in (INPUT1_LEFT, INPUT2_LEFT, INPUT3_RIGHT, INPUT4_RIGHT,
 
 # Initialize PWM at 1 kHz
 GPIO.output(ENABLE_LEFT, GPIO.LOW)
-pwm_left  = GPIO.PWM(ENABLE_LEFT, 1000)
+pwm_left = GPIO.PWM(ENABLE_LEFT, 1000)
 pwm_left.start(0)
 
 GPIO.output(ENABLE_RIGHT, GPIO.LOW)
@@ -192,10 +192,9 @@ try:
         left_wheel_speed = left_wheel_speed*l_trim_multiplier
         right_wheel_speed = right_wheel_speed*r_trim_multiplier
 
-        # Stop with no controller
         if not joysticks:
-            left_wheel_speed = 0
-            right_wheel_speed = 0
+            left_wheel_speed = right_wheel_speed = 0
+            left_dir = right_dir = 0
 
         # Write to input pins and get duty cycle
         left_duty_cycle, right_duty_cycle = convert_to_pwm(
