@@ -1,33 +1,15 @@
 #! /usr/bin/python
 
-import time
 import pygame
 import numpy as np
-import RPi.GPIO as GPIO
 
-pygame.init()
-pygame.joystick.init()
-
-# Adjust
-MAX_DUTY_CYCLE = 80
-MIN_DUTY_CYCLE = 25
-ANGULAR_MULTIPLIER = 0.3
-TRIM_STEP = 0.01
-
-# Initialize
-joysticks = []
-
-linear_speed = 0
-angular_speed = 0
-
-left_wheel_speed = 0
-right_wheel_speed = 0
-
-l_trim_multiplier = 1
-r_trim_multiplier = 1
-
-left_duty_cycle = 0
-right_duty_cycle = 0
+from gpiozero import Device, Motor
+from gpiozero.pins.mock import MockFactory
+try:
+    import RPi.GPIO as GPIO
+except Exception:
+    import Mock.GPIO as GPIO
+    Device.pin_factory = MockFactory()
 
 # Pins
 INPUT1_LEFT = 21
@@ -39,89 +21,76 @@ INPUT4_RIGHT = 8
 ENABLE_LEFT = 12
 ENABLE_RIGHT = 13
 
-# Set pin modes
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(INPUT1_LEFT, GPIO.OUT)
-GPIO.setup(INPUT2_LEFT, GPIO.OUT)
-GPIO.setup(INPUT3_RIGHT, GPIO.OUT)
-GPIO.setup(INPUT4_RIGHT, GPIO.OUT)
-GPIO.setup(ENABLE_LEFT, GPIO.OUT)
-GPIO.setup(ENABLE_RIGHT, GPIO.OUT)
+# Adjust
+MAX_DUTY_CYCLE = 0.50
+MIN_DUTY_CYCLE = 0.10
+ANGULAR_MULTIPLIER = 0.3
+TRIM_STEP = 0.01
 
-# Initialize PWM at 1 kHz
-pwm_left = GPIO.PWM(ENABLE_LEFT, 1000)
-pwm_left.start(0)
-pwm_left.ChangeDutyCycle(0)
+# Initialize
+joysticks = []
 
-pwm_right = GPIO.PWM(ENABLE_RIGHT, 1000)
-pwm_right.start(0)
-pwm_right.ChangeDutyCycle(0)
+l_trim_multiplier = 1
+r_trim_multiplier = 1
+
+# Motors
+left_motors = Motor(forward=INPUT1_LEFT,
+                    backward=INPUT2_LEFT, enable=ENABLE_LEFT)
+right_motors = Motor(forward=INPUT3_RIGHT,
+                     backward=INPUT4_RIGHT, enable=ENABLE_RIGHT)
+
+# Init
+pygame.init()
+pygame.joystick.init()
 
 
 def linear(joy):
+    """Reads the left joystick value from -1 (up) to 1 (down)"""
     left_thumb = joy.get_axis(1)
     if left_thumb > 0.1:
         linear_speed = left_thumb
+        thumb_dir = "backwards"
     elif left_thumb < -0.1:
-        linear_speed = left_thumb
+        linear_speed = -left_thumb
+        thumb_dir = "forwards"
     else:
         linear_speed = 0
-    return linear_speed
+        thumb_dir = ""
+    return linear_speed, thumb_dir
 
 
 def angular(joy):
+    """Reads the right joystick value from -1 (left) to 1 (right)"""
     right_thumb = joy.get_axis(2)
     if right_thumb > 0.1:
         angular_speed = right_thumb
+        ang_dir = "right"
     elif right_thumb < -0.1:
-        angular_speed = right_thumb
+        angular_speed = -right_thumb
+        ang_dir = "left"
     else:
         angular_speed = 0
-    return angular_speed
+        ang_dir = ""
+    return angular_speed, ang_dir
 
 
-def left_input(command):
-    if command == "forward":
-        GPIO.output(INPUT1_LEFT, GPIO.HIGH)
-        GPIO.output(INPUT2_LEFT, GPIO.LOW)
-    else:
-        GPIO.output(INPUT1_LEFT, GPIO.LOW)
-        GPIO.output(INPUT2_LEFT, GPIO.HIGH)
-
-
-def right_input(command):
-    if command == "forward":
-        GPIO.output(INPUT3_RIGHT, GPIO.HIGH)
-        GPIO.output(INPUT4_RIGHT, GPIO.LOW)
-    else:
-        GPIO.output(INPUT3_RIGHT, GPIO.LOW)
-        GPIO.output(INPUT4_RIGHT, GPIO.HIGH)
-
-
-def convert_to_pwm(left_dir, right_dir, left_wheel_speed, right_wheel_speed):
-    right_duty_cycle = np.interp(
-        right_wheel_speed, [0, 1+ANGULAR_MULTIPLIER], [0, MAX_DUTY_CYCLE])
-    left_duty_cycle = np.interp(
-        left_wheel_speed, [0, 1+ANGULAR_MULTIPLIER], [0, MAX_DUTY_CYCLE])
-    
-    if right_duty_cycle > 1 and right_duty_cycle < MIN_DUTY_CYCLE:
-        right_duty_cycle = MIN_DUTY_CYCLE
-    if left_duty_cycle > 1 and left_duty_cycle < MIN_DUTY_CYCLE:
-        left_duty_cycle = MIN_DUTY_CYCLE
-
-    if right_dir == 1 or right_dir == 0:
-        right_input("forward")
-    else:
-        right_input("backward")
-    if left_dir == 1 or left_dir == 0:
-        left_input("forward")
-    else:
-        left_input("backward")
-
-    return left_duty_cycle, right_duty_cycle
+def get_wheel_speeds(linear_speed, lin_dir, angular_speed, ang_dir):
+    """Calculates independent wheel speeds for left and right sides"""
+    left_wheel_speed, right_wheel_speed = linear_speed, linear_speed
+    if lin_dir != "":
+        angular_speed = np.interp(angular_speed, [0, 1], [
+                                  0, linear_speed*ANGULAR_MULTIPLIER])
+    if ang_dir == "right":
+        left_wheel_speed += angular_speed
+        right_wheel_speed -= angular_speed
+    elif ang_dir == "left":
+        left_wheel_speed -= angular_speed
+        right_wheel_speed += angular_speed
+    return left_wheel_speed, right_wheel_speed
 
 
 def trim(dir, l_trim_multiplier, r_trim_multiplier):
+    """Returns adjusted and clamped trim multipliers"""
     # Ensure good multipliers
     if l_trim_multiplier <= 0.5 or r_trim_multiplier <= 0.5:
         return l_trim_multiplier, r_trim_multiplier
@@ -138,6 +107,7 @@ def trim(dir, l_trim_multiplier, r_trim_multiplier):
 
 
 def reset_trim(l_trim_multiplier, r_trim_multiplier):
+    """Sets both trim values to 1"""
     l_trim_multiplier = 1
     r_trim_multiplier = 1
     return l_trim_multiplier, r_trim_multiplier
@@ -146,8 +116,8 @@ def reset_trim(l_trim_multiplier, r_trim_multiplier):
 running = True
 try:
     while running:
+        # Read events
         for event in pygame.event.get():
-            # Read events
 
             # Connect controller
             if event.type == pygame.JOYDEVICEADDED:
@@ -163,9 +133,9 @@ try:
         # Read joystick button presses and axis movements
         if joysticks:
             # Forward/backward direction and speed from [0,1]
-            linear_speed = linear(joy)
+            linear_speed, lin_dir = linear(joy)
             # Angular direction and speed from [0,1]
-            angular_speed = angular(joy)
+            angular_speed, ang_dir = angular(joy)
 
             # Check trim buttons
             if joy.get_hat(0)[0] == -1:  # Left-trim left
@@ -179,44 +149,36 @@ try:
                     l_trim_multiplier, r_trim_multiplier)
 
             # Calculate speeds
-            angular_speed = angular_speed * ANGULAR_MULTIPLIER
 
-            # Joystick Down
-            if linear_speed > 0:
-                left_wheel_speed = -linear_speed - angular_speed
-                right_wheel_speed = -linear_speed + angular_speed
+            left_wheel_speed, right_wheel_speed = get_wheel_speeds(
+                linear_speed, lin_dir, angular_speed, ang_dir)
 
-            # Joystick Up
-            else:
-                left_wheel_speed = -linear_speed + angular_speed
-                right_wheel_speed = -linear_speed - angular_speed
+            # Add trim multipliers
+            left_wheel_speed = left_wheel_speed*l_trim_multiplier
+            right_wheel_speed = right_wheel_speed*r_trim_multiplier
 
-        # Get final direction and magnitude of speed
-        left_dir = np.sign(left_wheel_speed)
-        right_dir = np.sign(right_wheel_speed)
+            # Convert to pwm signal
+            left_wheel_speed = np.interp(
+                left_wheel_speed, [0, 1+ANGULAR_MULTIPLIER],
+                [0, MAX_DUTY_CYCLE])
 
-        left_wheel_speed = np.abs(left_wheel_speed)
-        right_wheel_speed = np.abs(right_wheel_speed)
-
-        # Add boosts
-        left_wheel_speed = left_wheel_speed*l_trim_multiplier
-        right_wheel_speed = right_wheel_speed*r_trim_multiplier
+            # Write to input pins and get duty cycle
+            if lin_dir == "forwards":
+                left_motors.forward(left_wheel_speed)
+                right_motors.forward(right_wheel_speed)
+            elif lin_dir == "backwards":
+                left_motors.backward(left_wheel_speed)
+                right_motors.forward(right_wheel_speed)
 
         # Stop with no controller
-        if not joysticks:
+        else:
             left_wheel_speed = right_wheel_speed = 0
-            left_dir = right_dir = 0  
+            left_motors.stop()
+            right_motors.stop()
+        print(f"Left Motor: {left_motors.value}")
+        print(f"Right Motor: {right_motors.value}")
 
-        # Write to input pins and get duty cycle
-        left_duty_cycle, right_duty_cycle = convert_to_pwm(
-            left_dir, right_dir, left_wheel_speed, right_wheel_speed)
-
-        # Write to enablers
-        pwm_left.ChangeDutyCycle(left_duty_cycle)
-        pwm_right.ChangeDutyCycle(right_duty_cycle)
-        print(left_duty_cycle)
-        print(right_duty_cycle)
 finally:
-    pwm_left.stop()
-    pwm_right.stop()
+    left_motors.close()
+    right_motors.close()
     GPIO.cleanup()
