@@ -2,6 +2,7 @@
 
 import pygame
 import numpy as np
+import time
 
 from gpiozero import Device, Motor
 from gpiozero.pins.mock import MockFactory
@@ -22,7 +23,7 @@ ENABLE_LEFT = 12
 ENABLE_RIGHT = 13
 
 # Adjust
-MAX_DUTY_CYCLE = 0.50
+MAX_DUTY_CYCLE = 1
 MIN_DUTY_CYCLE = 0.10
 ANGULAR_MULTIPLIER = 0.3
 TRIM_STEP = 0.01
@@ -76,16 +77,18 @@ def angular(joy):
 
 def get_wheel_speeds(linear_speed, lin_dir, angular_speed, ang_dir):
     """Calculates independent wheel speeds for left and right sides"""
-    left_wheel_speed, right_wheel_speed = linear_speed, linear_speed
     if lin_dir != "":
         angular_speed = np.interp(angular_speed, [0, 1], [
                                   0, linear_speed*ANGULAR_MULTIPLIER])
+    else:
+        return angular_speed,angular_speed
+    left_wheel_speed, right_wheel_speed = linear_speed, linear_speed
     if ang_dir == "right":
-        left_wheel_speed += angular_speed
-        right_wheel_speed -= angular_speed
-    elif ang_dir == "left":
-        left_wheel_speed -= angular_speed
-        right_wheel_speed += angular_speed
+        left_wheel_speed +=  angular_speed
+        right_wheel_speed -=  angular_speed
+    if ang_dir == "left":
+        left_wheel_speed -=  angular_speed
+        right_wheel_speed +=  angular_speed
     return left_wheel_speed, right_wheel_speed
 
 
@@ -116,6 +119,7 @@ def reset_trim(l_trim_multiplier, r_trim_multiplier):
 running = True
 try:
     while running:
+        time.sleep(0.2)
         # Read events
         for event in pygame.event.get():
 
@@ -161,6 +165,9 @@ try:
             left_wheel_speed = np.interp(
                 left_wheel_speed, [0, 1+ANGULAR_MULTIPLIER],
                 [0, MAX_DUTY_CYCLE])
+            right_wheel_speed = np.interp(
+                right_wheel_speed, [0, 1+ANGULAR_MULTIPLIER],
+                [0, MAX_DUTY_CYCLE])
 
             # Write to input pins and get duty cycle
             if lin_dir == "forwards":
@@ -168,7 +175,16 @@ try:
                 right_motors.forward(right_wheel_speed)
             elif lin_dir == "backwards":
                 left_motors.backward(left_wheel_speed)
+                right_motors.backward(right_wheel_speed)
+            elif ang_dir == "right":
+                left_motors.forward(left_wheel_speed)
+                right_motors.backward(right_wheel_speed)
+            elif ang_dir == "left":
+                left_motors.backward(left_wheel_speed)
                 right_motors.forward(right_wheel_speed)
+            else:
+                left_motors.stop()
+                right_motors.stop()
 
         # Stop with no controller
         else:
